@@ -1,0 +1,26 @@
+# Exclude Android / Gradle / Firebase / IDE files from Vercel static web deployment
+app/
+gradle/
+.gradle/
+.aistudio/
+.build-outputs/
+build/
+dist/
+*.gradle
+*.gradle.kts
+build.gradle.kts
+settings.gradle.kts
+gradle.properties
+local.properties
+debug.keystore
+debug.keystore.base64
+google-services.json
+firebase.json
+firebase-blueprint.json
+firestore.rules
+firestore.test.js
+metadata.json
+.env
+.env.*
+*.apk
+*.aab
