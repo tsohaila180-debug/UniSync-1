@@ -4,7 +4,7 @@
   "outputDirectory": ".",
   "rewrites": [
     {
-      "source": "/((?!manifest\\.json$|sw\\.js$|icon\\.svg$|icon-192\\.png$|icon-512\\.png$|apple-touch-icon\\.png$|favicon\\.ico$).*)",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ],
