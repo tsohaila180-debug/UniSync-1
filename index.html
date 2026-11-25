@@ -9,8 +9,9 @@
   <meta name="apple-mobile-web-app-title" content="UniSync" />
   <title>UniSync</title>
   <link rel="manifest" href="./manifest.json" />
+  <link rel="icon" type="image/x-icon" href="./favicon.ico" />
   <link rel="icon" type="image/svg+xml" href="./icon.svg" />
-  <link rel="apple-touch-icon" href="./icon.svg" />
+  <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
   <style>
     :root {
       --bg: #EAF1FA;
@@ -547,7 +548,10 @@
       groupBtn: 'Group Repeated Questions',
       unifiedReply: 'Unified Reply to All',
       publishMat: 'Publish Material',
-      ringtone: 'Ringtone'
+      ringtone: 'Ringtone',
+      unansweredInquiries: 'Unanswered Inquiries',
+      criticalPriority: 'Critical Priority',
+      searchPlaceholder: 'Search...'
     };
 
     const STRINGS_AR = {
@@ -648,7 +652,10 @@
       groupBtn: 'تجميع الأسئلة المتكررة',
       unifiedReply: 'رد موحد للجميع',
       publishMat: 'نشر مادة علمية',
-      ringtone: 'نغمة التنبيه'
+      ringtone: 'نغمة التنبيه',
+      unansweredInquiries: 'الاستفسارات المعلقة',
+      criticalPriority: 'الأولوية الحرجة',
+      searchPlaceholder: 'بحث...'
     };
 
     const EXTRA_LANGS = {
@@ -1467,11 +1474,11 @@
         <div style="display:flex;flex-direction:column;gap:12px;">
           <div class="grid-2">
             <div class="card" style="background:var(--primary);color:var(--on-primary);">
-              <div style="font-size:0.82rem;opacity:0.88;">Unanswered Inquiries</div>
+              <div style="font-size:0.82rem;opacity:0.88;">${esc(S.unansweredInquiries)}</div>
               <div style="font-size:1.65rem;font-weight:800;">${pendingCount}</div>
             </div>
             <div class="card">
-              <div class="muted">Critical Priority</div>
+              <div class="muted">${esc(S.criticalPriority)}</div>
               <div style="font-size:1.65rem;font-weight:800;color:#9E2A3B;">${criticalCount}</div>
             </div>
           </div>
@@ -1491,7 +1498,7 @@
           </div>
 
           <div class="row">
-            <input id="instEmailSearch" class="input" style="flex:1;min-width:180px;" placeholder="Search..." value="${esc(state.emailSearch)}" />
+            <input id="instEmailSearch" class="input" style="flex:1;min-width:180px;" placeholder="${esc(S.searchPlaceholder)}" value="${esc(state.emailSearch)}" />
             ${['ALL','CRITICAL','HIGH','NORMAL','LOW'].map((p) => `
               <button type="button" class="pill ${state.emailFilter === p ? 'active' : ''}" data-email-filter="${p}">${p}</button>
             `).join('')}
@@ -2537,6 +2544,13 @@
         cdEl.textContent = formatCountdown(nextEv.ts);
       }
     }, 1000);
+
+    if (window.location.hash.includes('access_token=') || window.location.search.includes('code=')) {
+      state.loggedIn = true;
+      state.authProvider = 'microsoft';
+      saveState();
+      try { window.history.replaceState({}, document.title, window.location.pathname); } catch (_) {}
+    }
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
