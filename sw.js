@@ -1,4 +1,4 @@
-const CACHE_NAME = 'unisync-pwa-v2';
+const CACHE_NAME = 'unisync-pwa-v3';
 const STATIC_ASSETS = [
   './',
   './index.html',
@@ -12,7 +12,9 @@ const STATIC_ASSETS = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS)).catch(() => {})
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.allSettled(STATIC_ASSETS.map((url) => cache.add(url)))
+    ).catch(() => {})
   );
   self.skipWaiting();
 });
@@ -28,21 +30,55 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
-  const reqUrl = new URL(event.request.url);
+  let reqUrl;
+  try {
+    reqUrl = new URL(event.request.url);
+  } catch (_) {
+    return;
+  }
   if (reqUrl.origin !== self.location.origin) return;
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const networkFetch = fetch(event.request)
+  const isHtmlNav =
+    event.request.mode === 'navigate' ||
+    (event.request.headers.get('accept') || '').includes('text/html');
+
+  if (isHtmlNav) {
+    event.respondWith(
+      fetch(event.request)
         .then((res) => {
-          if (res && res.status === 200) {
+          if (res && res.ok) {
             const copy = res.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+            caches.open(CACHE_NAME).then((cache) => cache.put('./index.html', copy)).catch(() => {});
           }
           return res;
         })
-        .catch(() => cached || caches.match('./index.html'));
-      return cached || networkFetch;
+        .catch(async () => {
+          return (
+            (await caches.match(event.request)) ||
+            (await caches.match('./index.html')) ||
+            (await caches.match('./')) ||
+            new Response('<h1>UniSync</h1><p>Offline — please reconnect.</p>', {
+              status: 503,
+              headers: { 'Content-Type': 'text/html; charset=utf-8' }
+            })
+          );
+        })
+    );
+    return;
+  }
+
+  event.respondWith(
+    caches.match(event.request).then((cached) => {
+      if (cached) return cached;
+      return fetch(event.request)
+        .then((res) => {
+          if (res && res.status === 200) {
+            const copy = res.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => {});
+          }
+          return res;
+        })
+        .catch(() => Response.error());
     })
   );
 });

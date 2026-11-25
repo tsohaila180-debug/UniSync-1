@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#142D59" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="UniSync" />
@@ -1167,17 +1168,58 @@
       supportBranch: 'All Branches'
     };
 
+    function cloneObj(obj) {
+      return JSON.parse(JSON.stringify(obj));
+    }
+
+    function sanitizeState(rawObj) {
+      const base = cloneObj(DEFAULT_STATE);
+      if (!rawObj || typeof rawObj !== 'object') return base;
+      const merged = Object.assign(base, rawObj);
+      const validStudentTabs = ['home', 'inbox', 'pomodoro', 'calendar', 'chat', 'hub', 'roadmaps', 'gpa', 'portals', 'support'];
+      const validInstructorTabs = ['smart_inbox', 'calendar', 'materials', 'chat_email', 'portals', 'support'];
+
+      merged.role = merged.role === 'INSTRUCTOR' ? 'INSTRUCTOR' : 'STUDENT';
+      if (!LANGUAGES.some((l) => l.code === merged.language)) merged.language = 'en';
+      if (!AOU_BRANCHES.some((b) => b.name === merged.branch)) merged.branch = 'Riyadh';
+      if (!MAJORS.some((m) => m.id === merged.majorId)) merged.majorId = 'cs';
+      if (!validStudentTabs.includes(merged.studentTab)) merged.studentTab = 'home';
+      if (!validInstructorTabs.includes(merged.instructorTab)) merged.instructorTab = 'smart_inbox';
+
+      ['books', 'bookMessages', 'materials', 'emails', 'clusters', 'forumPosts', 'chats', 'voiceNotes', 'events', 'gpaCourses'].forEach((k) => {
+        if (!Array.isArray(merged[k])) merged[k] = cloneObj(DEFAULT_STATE[k]);
+      });
+      if (!merged.courseStatuses || typeof merged.courseStatuses !== 'object' || Array.isArray(merged.courseStatuses)) {
+        merged.courseStatuses = {};
+      }
+      if (!merged.studyAids || typeof merged.studyAids !== 'object') {
+        merged.studyAids = { flashcards: [], mindMap: [] };
+      } else {
+        if (!Array.isArray(merged.studyAids.flashcards)) merged.studyAids.flashcards = [];
+        if (!Array.isArray(merged.studyAids.mindMap)) merged.studyAids.mindMap = [];
+      }
+      merged.roadmapZoom = Number.isFinite(Number(merged.roadmapZoom)) ? Math.max(0, Math.min(200, Number(merged.roadmapZoom))) : (window.innerWidth < 600 ? 70 : 100);
+      merged.roadmapPanX = Number.isFinite(Number(merged.roadmapPanX)) ? Number(merged.roadmapPanX) : 0;
+      merged.roadmapPanY = Number.isFinite(Number(merged.roadmapPanY)) ? Number(merged.roadmapPanY) : 0;
+      merged.fontScale = Number.isFinite(Number(merged.fontScale)) ? Number(merged.fontScale) : 1;
+      merged.pomodoroMinutes = Number.isFinite(Number(merged.pomodoroMinutes)) && Number(merged.pomodoroMinutes) > 0 ? Number(merged.pomodoroMinutes) : 25;
+      merged.pomodoroSecondsLeft = Number.isFinite(Number(merged.pomodoroSecondsLeft)) && Number(merged.pomodoroSecondsLeft) >= 0 ? Number(merged.pomodoroSecondsLeft) : merged.pomodoroMinutes * 60;
+      merged.focusMinutesLogged = Number.isFinite(Number(merged.focusMinutesLogged)) ? Number(merged.focusMinutesLogged) : 30;
+      merged.pomodoroRunning = false;
+      merged.isRecordingVoice = false;
+      merged.focusLockBanner = false;
+      merged.drawerOpen = false;
+      merged.activeAlarm = null;
+      return merged;
+    }
+
     function loadState() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return structuredClone(DEFAULT_STATE);
-        return Object.assign(structuredClone(DEFAULT_STATE), JSON.parse(raw), {
-          pomodoroRunning: false,
-          drawerOpen: false,
-          activeAlarm: null
-        });
+        if (!raw) return cloneObj(DEFAULT_STATE);
+        return sanitizeState(JSON.parse(raw));
       } catch (_) {
-        return structuredClone(DEFAULT_STATE);
+        return cloneObj(DEFAULT_STATE);
       }
     }
 
@@ -1274,20 +1316,32 @@
       return `📖 [${top.title}]: ${top.content}`;
     }
 
-    // Main Render Loop
+    // Main Render Loop (Resilient against corrupted state or unexpected runtime errors)
     function render() {
-      applyThemeAndLocale();
-      const S = t(state.language);
       const root = document.getElementById('app');
-
-      if (!state.loggedIn) {
-        root.innerHTML = renderAuthScreen(S);
-        bindAuthEvents(S);
-        return;
+      if (!root) return;
+      try {
+        applyThemeAndLocale();
+        const S = t(state.language);
+        if (!state.loggedIn) {
+          root.innerHTML = renderAuthScreen(S);
+          bindAuthEvents(S);
+          return;
+        }
+        root.innerHTML = renderWorkspace(S);
+        bindWorkspaceEvents(S);
+      } catch (err) {
+        try {
+          state = cloneObj(DEFAULT_STATE);
+          saveState();
+          applyThemeAndLocale();
+          const S = t(state.language);
+          root.innerHTML = renderAuthScreen(S);
+          bindAuthEvents(S);
+        } catch (_) {
+          root.innerHTML = '<div style="padding:24px;font-family:sans-serif;"><h2>UniSync</h2><button onclick="localStorage.clear();location.reload();">Reload App</button></div>';
+        }
       }
-
-      root.innerHTML = renderWorkspace(S);
-      bindWorkspaceEvents(S);
     }
 
     function renderAuthScreen(S) {
@@ -2767,16 +2821,16 @@
         saveState(); updateTransform();
       });
 
-      let dragging = false, moved = false, startX = 0, startY = 0, basePanX = 0, basePanY = 0;
+      let dragging = false, moved = false, startX = 0, startY = 0, basePanX = 0, basePanY = 0, pinchDist = 0, pinchZoomBase = state.roadmapZoom;
       vp.addEventListener('pointerdown', (e) => {
         if (e.target.closest('[data-course-node]')) return;
         dragging = true; moved = false;
         startX = e.clientX; startY = e.clientY;
         basePanX = state.roadmapPanX; basePanY = state.roadmapPanY;
-        vp.setPointerCapture(e.pointerId);
+        try { vp.setPointerCapture(e.pointerId); } catch (_) {}
       });
       vp.addEventListener('pointermove', (e) => {
-        if (!dragging) return;
+        if (!dragging || pinchDist > 0) return;
         const dx = e.clientX - startX;
         const dy = e.clientY - startY;
         if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
@@ -2785,6 +2839,25 @@
         updateTransform();
       });
       vp.addEventListener('pointerup', () => { dragging = false; saveState(); });
+      vp.addEventListener('pointercancel', () => { dragging = false; });
+      vp.addEventListener('touchstart', (e) => {
+        if (e.touches && e.touches.length === 2) {
+          dragging = false;
+          pinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+          pinchZoomBase = state.roadmapZoom;
+        }
+      }, { passive: true });
+      vp.addEventListener('touchmove', (e) => {
+        if (e.touches && e.touches.length === 2 && pinchDist > 0) {
+          e.preventDefault();
+          const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+          state.roadmapZoom = Math.max(0, Math.min(200, pinchZoomBase + (dist - pinchDist) * 0.35));
+          updateTransform();
+        }
+      }, { passive: false });
+      vp.addEventListener('touchend', () => {
+        if (pinchDist > 0) { pinchDist = 0; saveState(); }
+      });
       vp.addEventListener('wheel', (e) => {
         e.preventDefault();
         state.roadmapZoom = Math.max(0, Math.min(200, state.roadmapZoom - Math.sign(e.deltaY) * 10));
@@ -2879,13 +2952,17 @@
       try { window.history.replaceState({}, document.title, window.location.pathname); } catch (_) {}
     }
 
-    if ('serviceWorker' in navigator) {
+    if ('serviceWorker' in navigator && /^https?:$/.test(window.location.protocol)) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('./sw.js').catch(() => {});
       });
     }
 
-    render();
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', render);
+    } else {
+      render();
+    }
   })();
   </script>
 </body>
